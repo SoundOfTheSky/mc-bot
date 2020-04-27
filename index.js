@@ -1,32 +1,19 @@
 const mineflayer = require('mineflayer');
-const navigatePlugin = require('./navigate')(mineflayer);
+const navigation = require('./navigation');
 const getTps = require('./getTps');
 class bot {
   static list=[];
   constructor(options) {
     this.bot=mineflayer.createBot(options);
-    navigatePlugin(this.bot);
     this.id=bot.list.length;
-    bot.list.push(this);
-    this.bot.navigate.on('pathFound', function (path) {
-      this.bot.chat("found path. I can get there in " + path.length + " moves.");
-    });
-    this.bot.navigate.on('cannotFind', function (closestPath) {
-      this.bot.chat("unable to find path. getting as close as possible");
-      this.bot.navigate.walk(closestPath);
-    });
-    this.bot.navigate.on('arrived', function () {
-      this.bot.chat("I have arrived");
-    });
-    this.bot.on('chat', function(username, message) {
-      // navigate to whoever talks
+    this.bot.on('chat', (username, message)=>{
       if (username === this.bot.username) return;
       const target = this.bot.players[username].entity;
       if (message === 'come') {
-        this.bot.navigate.to(target.position);
-      } else if (message === 'stop') {
-        this.bot.navigate.stop();
+        navigation.navigate(this.bot,target.position);
       }
+      if(message==='hey')
+        this.bot.lookAt(target.position);
     });
   }
   tps = null;
@@ -47,6 +34,5 @@ class bot {
 const skyBot = new bot({
   username: 'SkyBot',
   host: 'localhost',
-  port: 8219
+  port: 2872
 });
-navigatePlugin(bot);
