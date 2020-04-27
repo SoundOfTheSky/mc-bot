@@ -15,15 +15,22 @@ function Node(point,action) {
     return this.point.x+'_'+this.point.y+'_'+this.point.z;
   }
 }
-function moveToPoint(bot,p,sprint=true, jump=false) {
-  const pos = bot.entity.position;
+const vecMid = v=>v.floored().offset(.5,0,.5);
+function moveToPoint(bot,p,sprint=true, jump=false, longjump=false,swim=false) {
+  bot.entity.position=vecMid(bot.entity.position);
   return new Promise((r,j)=>{
     const interval = setInterval(()=>{
-      bot.lookAt(vecMid(vec3(p.x,pos.y+bot.entity.height,p.z)));
-      if(jump)
-        console.log(pos.distanceTo(vecMid(pos)));
-      if(jump&&pos.distanceTo(vecMid(pos))>0.4)
-        bot.setControlState('jump', true);
+      bot.lookAt(vec3(p.x+0.5,bot.entity.position.y+1.9,p.z+0.5));
+      if(longjump&&bot.entity.position.distanceTo(vecMid(bot.entity.position.floored()))>0.4) bot.setControlState('jump', true);
+      if(jump) bot.setControlState('jump', true);
+      if(swim) {
+        bot.entity.position.x +=p.x > bot.entity.position.x?0.1:-0.1;
+        bot.entity.position.y +=p.y > bot.entity.position.y?0.1:-0.1;
+        bot.entity.position.z +=p.x > bot.entity.position.z?0.1:-0.1;
+      }
+      /*console.log(vecMid(p));
+      console.log(bot.entity.position);
+      console.log(bot.entity.position.distanceTo(vecMid(p)));*/
       if(bot.entity.position.distanceTo(vecMid(p))<0.2) {
         console.log('ok');
         clearInterval(interval);
@@ -48,7 +55,8 @@ const navigate = async (bot,coords, options={})=>{
   });
   if(results.status==='success') {
     for(const node of results.path) {
-      await moveToPoint(bot,node.point,false,node.a==='jump');
+      console.log(node);
+      await moveToPoint(bot,node.point,false,node.action==='jump', node.action==='longjump', node.action==='swim');
     }
     console.log('FINISH')
   }
@@ -69,15 +77,27 @@ function getNeighbors(node,bot) {
     const block0 = getBlock(point.offset(0,dv,0));
     if(block0.type===8||block0.type===9) return result.push({p:point.offset(0,dv,0), a:'swim'});
   });
+  const isFloor = b=>b.boundingBox==='block'||b.type===8||b.type===9;
+  function getSafeFloor(x,z) {
+    for(let y=-1; y<point.y; y++) {
+      const b=getBlock(point.offset(x,-y,z))
+      if(b.boundingBox==='block'||b.type===8||b.type===9) return result.push({p:point.offset(x,-y+1,z),a:'walk'});
+    }
+  }
   cardinalDirectionVectors.forEach(dv=>{
     if(getBlock(point.offset(dv.x,1,dv.z)).boundingBox==='block') return;
-    const block0 = getBlock(point.offset(dv.x,0,dv.z));
-    if(block0.boundingBox==='block') {
+    if(getBlock(point.offset(dv.x,0,dv.z)).boundingBox==='block') {
       if(getBlock(point.offset(0, 2, 0)).boundingBox==='block') return;
       if(getBlock(point.offset(dv.x, 2, dv.z)).boundingBox==='block') return;
       return result.push({p:point.offset(dv.x,1,dv.z),a:'jump'});
     }
-    if(block0.type===8||block0.type===9) return result.push({p:point.offset(dv.x,0,dv.z),a:'swim'});
+    const block = getBlock(point);
+    if(block.type===8||block.type===9) {
+      if(getBlock(point.offset(0,2,0)).boundingBox==='empty') result.push({p:point.offset(0,1,0),a:'swim'});
+      if(getBlock(point.offset(0,-1,0)).boundingBox==='empty') result.push({p:point.offset(0,-1,0),a:'swim'});
+       result.push({p:point.offset(dv.x,0,dv.z),a:'swim'});
+      return;
+    }
     if(getBlock(point.offset(dv.x,-1,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,0,dv.z),a:'walk'});
     if(getBlock(point.offset(dv.x,-2,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,-1,dv.z),a:'walk'});
     if(getBlock(point.offset(dv.x,-3,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,-2,dv.z),a:'walk'});
@@ -98,13 +118,9 @@ function getNeighbors(node,bot) {
         if(h<=1&&getBlock(point.offset(dv.x*i, j - 3, dv.z*i)).boundingBox === 'empty'&& getBlock(point.offset(dv.x*i, j - 4, dv.z*i)).boundingBox === 'block')
           return result.push({p:point.offset(dv.x*i, j - 3, dv.z*i),a:'longjump'});
       }
-      console.log('end');
     }
   });
   return result.map(el=>new Node(el.p, el.a));
-}
-function vecMid(p) {
-  return p.floor().offset(.5,0,.5);
 }
 module.exports = {
   navigate: navigate,
