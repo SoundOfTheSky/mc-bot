@@ -15,32 +15,26 @@ class bot {
         this.bot.lookAt(target.position);
     });
   }
-  tps = null;
   lastPosition=vec3(0,0,0);
-  everySec =  setInterval(async ()=>{
-    const oldtps = this.tps;
-    this.tps = await getTps(this.bot);
-    if(!oldtps&&this.tps) {
-      console.log('connected!');
-      this.bot.physics.jumpSpeed=10;
-      console.log(this.bot.physics);
-      this.everyTick = setInterval(()=>{
-        let p = this.bot.entity.position.floored();
-        if(!this.lastPosition.equals(p)) {
-          this.lastPosition=p;
-          const b = this.bot.blockAt(p);
-          if(b.type===8||b.type===9) this.bot.physics.gravity=0;
-          else this.bot.physics.gravity=27;
-        }
-      },50)
+  everySec =  setInterval(async ()=>{},1000);
+  everyTick = setInterval(()=>{
+    if(!this.bot.entity) return;
+    this.bot.look(Math.PI, 0);
+    this.bot.setControlState('forward', true);
+    //console.log(this.bot.physics.walkingAcceleration+'_'+this.bot.physics.sprintSpeed);
+    //console.log(((this.bot.physics.walkingAcceleration * -Math.sin(this.bot.entity.yaw)*this.bot.physics.sprintSpeed)/20) + '_'+(this.bot.physics.walkingAcceleration * -Math.cos(this.bot.entity.yaw)*this.bot.physics.sprintSpeed/20))
+    let p = this.bot.entity.position.floored();
+    if(!this.lastPosition.equals(p)) {
+      this.lastPosition=p;
+      const b = this.bot.blockAt(p);
+      if(!b) return;
+      if(b.type===8||b.type===9) this.bot.physics.gravity=0;
+      else this.bot.physics.gravity=27;
     }
-    if(this.tps&&this.tps!==oldtps) {
-      console.log(`tps: ${this.tps}`);
-    }
-  },1000);
+  },50)
 }
 const skyBot = new bot({
   username: 'SkyBot',
   host: 'localhost',
-  port: 5116
+  port: 6324
 });
