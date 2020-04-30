@@ -63,7 +63,7 @@ class Navigator {
             } else {
               this.bot.setControlState('forward', true);
               this.bot.setControlState('sprint', true);
-              if (this.bot.onGround && Math.floor(this.bot.entity.position.y) < Math.floor(node.point.y))
+              if (this.bot.entity.onGround && Math.floor(this.bot.entity.position.y) < Math.floor(p.y))
                 this.bot.setControlState('jump', true);
             }
           }
@@ -83,8 +83,11 @@ class Navigator {
           if (node.right === -1) this.bot.setControlState('left', true);
           if (node.jump) this.bot.setControlState('jump', true);
           if (node.sprint) this.bot.setControlState('sprint', true);
-          if (this.bot.entity.position.distanceTo(node.point) < 0.1) r();
-          else
+          const d=this.bot.entity.position.distanceTo(node.point);
+          if (d < 0.1) {
+            console.log(d);
+            r();
+          } else
             console.log(`FUCKING ALARM IDK HOW PROGRAMMING WORKS
             ${this.bot.entity.position.distanceTo(node.point)} meters away`);
         }, 50);
@@ -102,6 +105,7 @@ class Navigator {
     });
     if (results.status === 'success') {
       for (const node of results.path) {
+        console.log('goto ' + node.point);
         await this.moveToPoint(node);
       }
     }
@@ -128,11 +132,10 @@ class Navigator {
     }
     return false;
   }
-  emulatePhysics(pos, yaw, forward, right, jump, onGround = true, falling = 0, sprint = true, vel = Vec3(0, 0, 0),debug) {
-    for (let t = 1; t <= 1; t++) {
+  emulatePhysics(pos, yaw, forward, right, jump, onGround = true, falling = 0, sprint = true, vel = Vec3(0, 0, 0)) {
+    for (let t = 1; ; t++) {
       // set acceleration to input
       const acceleration = new Vec3(0, 0, 0);
-      if(debug) console.log(acceleration);
       if (forward || right) {
         const rotationFromInput = Math.atan2(-right, forward);
         const inputYaw = this.bot.entity.yaw + rotationFromInput;
@@ -143,17 +146,14 @@ class Navigator {
           acceleration.z *= this.bot.physics.sprintSpeed;
         }
       }
-      if(debug) console.log(acceleration);
       acceleration.x += this.bot.physics.walkingAcceleration * -Math.sin(yaw);
       acceleration.z += this.bot.physics.walkingAcceleration * -Math.cos(yaw);
       if (sprint) {
         acceleration.x *= this.bot.physics.sprintSpeed;
         acceleration.z *= this.bot.physics.sprintSpeed;
       }
-      if(debug) console.log(acceleration);
       if (jump && onGround) vel.y = this.bot.physics.jumpSpeed;
       acceleration.y -= this.bot.physics.gravity;
-      if(debug) console.log(acceleration);
       // ground friction
       const oldGroundSpeedSquared = vel.x * vel.x + vel.z * vel.z;
       if (oldGroundSpeedSquared < EPSILON) {
@@ -168,7 +168,6 @@ class Navigator {
         acceleration.x -= (vel.x / oldGroundSpeed) * groundFriction;
         acceleration.z -= (vel.z / oldGroundSpeed) * groundFriction;
       }
-      if(debug) console.log(acceleration);
       // acceleration to velocity
       vel.add(acceleration.scaled(0.05));
       // change velocity based on ground
@@ -216,9 +215,10 @@ class Navigator {
         boundingBoxMax = new Vec3(boundingBox.max.x, blockY, boundingBox.max.z);
         if (this.collisionInRange(boundingBoxMin, boundingBoxMax)) {
           pos.y = blockY + (vel.y < 0 ? 1 : -this.bot.physics.playerHeight) * 1.001;
-          if (falling > 3 && !isWater(this.blockAt(pos))) return false;
+          if (falling < -3 && !isWater(this.blockAt(pos))) return false;
           onGround = true;
           vel.y = 0;
+          break;
         }
       }
     }
@@ -238,146 +238,104 @@ class Navigator {
     return block0.boundingBox === 'block';
   }
   getNeighborsUsingPhysics(node) {
-    const results = [];
-    let canJump;
-    // if in water
-    if (this.isSafePos(node.point.offset(0, 1, 0))) results.push({ pos: node.point.offset(0, 1, 0) });
-    if (this.isSafePos(node.point.offset(0, -1, 0))) results.push({ pos: node.point.offset(0, -1, 0) });
-    // if player on ground check cardinal directions
-    if (node.onGround)
-      for (let i = 0; i < directions.length; i++) {
-        const checkDir = i => {
-          const d = directions[i];
-          const b = (y, m = 1) => node.point.offset(d.x * m, y, d.z * m);
-          // if block at head height can do nothing
-          if (this.blockAt(b(1)).boundingBox === 'block') return;
-          // can walk forward
-          if (this.isSafePos(b(0))) return results.push({ pos: b(0) });
-          // can jump on block
-          canJump = this.blockAt(node.point.offset(0, 2, 0)).boundingBox === 'empty';
-          if (canJump && this.isSafePos(b(1))) return results.push({ pos: b(1) });
-          // can jump off safely
-          for (let hy = 1; hy <= 3; hy++) if (this.isSafePos(b(-hy))) return results.push({ pos: b(-hy) });
-          if (this.isSafePos(b(-3, 2))) return results.push({ pos: b(-3, 2) });
-          // start jump calculation if can do nothing
-          if (canJump) {
-            // check the jump only for this direction and the diagonal direction to the right
-            [radians[i * 2], radians[i * 2 + 1]].forEach(r => {
-              // emulate mineflayer physics
-              let p = this.emulatePhysics(node.point, r, 1, 0, true, node.onGround, node.falling, true, node.vel);
-              // if don't collide with anything on the x, z axis or take damage from falling
-              if (p) results.push({ ...p, yaw: node.yaw, forward: 1, right: 0, jump: true, sprint: true });
-            });
-          }
-        };
-        checkDir(i);
-      }
-    //if player not on ground check every possible input for every tick
-    else
-      [
-        [1, 0],
-        [1, 1],
-        [1, -1],
-        [0, 1],
-        [0, -1],
-        [-1, 1],
-        [-1, -1],
-      ].forEach(o => {
-        console.log('emulaTE')
-        let p = this.emulatePhysics(
-          node.point,
-          node.yaw,
-          o[0],
-          o[1],
-          false,
-          node.onGround,
-          node.falling,
-          true,
-          node.vel,
-          true,
-        );
-        if (p) results.push({ ...p, yaw: node.yaw, forward: o[0], right: o[1], jump: false, sprint: true });
-      });
-    return results.map(
-      el =>
-        new Node(el.pos, el.action, el.yaw, el.forward, el.right, el.jump, el.onGround, el.falling, el.sprint, el.vel),
-    );
+    console.log(node.point);
+    try {
+      const p = node.point.floored();
+      const results = [];
+      let canJump;
+      // if in water
+      if (this.isSafePos(p.offset(0, 1, 0))) results.push({ pos: p.offset(0, 1, 0) });
+      if (this.isSafePos(p.offset(0, -1, 0))) results.push({ pos: p.offset(0, -1, 0) });
+      // if player on ground check cardinal directions
+      if (node.onGround)
+        for (let i = 0; i < directions.length; i++) {
+          const checkDir = i => {
+            const d = directions[i];
+            const b = (y, m = 1) => p.offset(d.x * m, y, d.z * m);
+            // if block at head height can do nothing
+            if (this.blockAt(b(1)).boundingBox === 'block') return;
+            // can walk forward
+            if (this.isSafePos(b(0))) return results.push({ pos: b(0) });
+            // can jump on block
+            canJump = this.blockAt(p.offset(0, 2, 0)).boundingBox === 'empty';
+            if (canJump && this.isSafePos(b(1))) return results.push({ pos: b(1) });
+            // can jump off safely
+            for (let hy = 1; hy <= 3; hy++) if (this.isSafePos(b(-hy))) return results.push({ pos: b(-hy) });
+            if (this.isSafePos(b(-3, 2))) return results.push({ pos: b(-3, 2) });
+            // start jump calculation if can do nothing
+            if (canJump) {
+              // check the jump only for this direction and the diagonal direction to the right
+              [radians[i * 2], radians[i * 2 + 1]].forEach(r => {
+                // emulate mineflayer physics
+                let point = this.emulatePhysics(p.clone(), r, 1, 0, true, node.onGround, node.falling, true, node.vel);
+                // if don't collide with anything on the x, z axis or take damage from falling
+                if (point) results.push({ ...point, yaw: r, forward: 1, right: 0, jump: true, sprint: true });
+              });
+            }
+          };
+          checkDir(i);
+        }
+      //if player not on ground check every possible input for every tick
+      else
+        [
+          [1, 0],
+          [1, 1],
+          [1, -1],
+          [0, 1],
+          [0, -1],
+          [-1, 1],
+          [-1, -1],
+        ].forEach(o => {
+          console.log('emulate');
+          let p = this.emulatePhysics(
+            node.point,
+            node.yaw,
+            o[0],
+            o[1],
+            false,
+            node.onGround,
+            node.falling,
+            true,
+            node.vel,
+          );
+          if (p) results.push({ ...p, yaw: node.yaw, forward: o[0], right: o[1], jump: false, sprint: true, action:'navigate' });
+        });
+      /*console.log(
+        results.map(
+          el =>
+            new Node(
+              el.pos,
+              el.action,
+              el.yaw,
+              el.forward,
+              el.right,
+              el.jump,
+              el.onGround,
+              el.falling,
+              el.sprint,
+              el.vel,
+            ),
+        ),
+      );*/
+      return results.map(
+        el =>
+          new Node(
+            el.pos,
+            el.action,
+            el.yaw,
+            el.forward,
+            el.right,
+            el.jump,
+            el.onGround,
+            el.falling,
+            el.sprint,
+            el.vel,
+          ),
+      );
+    } catch (e) {
+      //console.log(e);
+      return [];
+    }
   }
 }
-/*function getNeighbors(node,bot) {
-  const getBlock = p=>blockAt(bot,p);
-  blocks={};
-  const point = node.point
-  const result = [];
-  const isFloor = b=>b.boundingBox==='block'||isWater(b);
-  function getSafeFloor(x,z) {
-    for(let y=-1; y<point.y; y++) {
-      const b=getBlock(point.offset(x,-y,z))
-      if(b.boundingBox==='block') return result.push({p:point.offset(x,-y+1,z),a:'walk'});
-    }
-  }
-  function safePos(p) {
-    const b0=getBlock(p);
-    const b1=getBlock(p.offset(0,1,0));
-    if(isWater(b0)||isWater(b1)) return true;
-    return isFloor(getBlock(p.offset(0,-1,0)));
-  }
-  // up or down
-  [-1,1].forEach(dv=>{
-    const block0 = getBlock(point.offset(0,dv,0));
-    if(block0.type===8||block0.type===9) return result.push({p:point.offset(0,dv,0), a:'swim'});
-  });
-  // simple directions
-  [
-    Vec3(-1, 0, 0), // north
-    Vec3(1, 0, 0), // south
-    Vec3(0, 0, -1), // east
-    Vec3(0, 0, 1) // west
-  ]
-    .forEach(dv=>{
-    if(getBlock(point.offset(dv.x,1,dv.z)).boundingBox==='block') return;
-    if(getBlock(point.offset(dv.x,0,dv.z)).boundingBox==='block') {
-      if(getBlock(point.offset(0, 2, 0)).boundingBox==='block') return;
-      if(getBlock(point.offset(dv.x, 2, dv.z)).boundingBox==='block') return;
-      return result.push({p:point.offset(dv.x,1,dv.z),a:'jump'});
-    }
-    if(isWater(getBlock(point))||isWater(getBlock(point.offset(0,1,0)))) {
-      if(getBlock(point.offset(0,2,0)).boundingBox==='empty') result.push({p:point.offset(0,1,0),a:'swim'});
-      if(getBlock(point.offset(0,-1,0)).boundingBox==='empty') result.push({p:point.offset(0,-1,0),a:'swim'});
-      //CHECK FALL IF BELOW
-      //result.push({p:point.offset(dv.x,0,dv.z),a:'swim'});
-      //DONT LET LONGJUMP
-    }
-    if(getBlock(point.offset(dv.x,-1,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,0,dv.z),a:'walk'});
-    if(getBlock(point.offset(dv.x,-2,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,-1,dv.z),a:'walk'});
-    if(getBlock(point.offset(dv.x,-3,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,-2,dv.z),a:'walk'});
-    if(getBlock(point.offset(dv.x,-4,dv.z)).boundingBox==='block') return result.push({p:point.offset(dv.x,-3,dv.z),a:'walk'});
-
-
-    const maxHeight=point.y+1;
-    for(let i=1; i<jumpHeights.length;i++) {
-      const j = jumpHeights[i];
-      const h=maxHeight-point.offset(0,j,0).y;
-      if(getBlock(point.offset(dv.x*i,j,dv.z*i)).boundingBox==='empty') {
-        if (getBlock(point.offset(dv.x*i, j + 1, dv.z*i)).boundingBox === 'empty' && getBlock(point.offset(dv.x*i, j - 1, dv.z*i)).boundingBox === 'block')
-          return result.push({p:point.offset(dv.x*i, j, dv.z*i),a:'longjump'});
-        if (h<=3&&getBlock(point.offset(dv.x*i, j - 1, dv.z*i)).boundingBox === 'empty' && getBlock(point.offset(dv.x*i, j - 2, dv.z*i)).boundingBox === 'block')
-          return result.push({p:point.offset(dv.x*i, j - 1, dv.z*i),a:'longjump'});
-      }
-      if(getBlock(point.offset(dv.x*i,j-2,dv.z*i)).boundingBox==='empty') {
-        if(h<=2&&getBlock(point.offset(dv.x*i, j - 1, dv.z*i)).boundingBox === 'empty'&& getBlock(point.offset(dv.x*i, j - 3, dv.z*i)).boundingBox === 'block')
-          return result.push({p:point.offset(dv.x*i, j - 2, dv.z*i),a:'longjump'});
-        if(h<=1&&getBlock(point.offset(dv.x*i, j - 3, dv.z*i)).boundingBox === 'empty'&& getBlock(point.offset(dv.x*i, j - 4, dv.z*i)).boundingBox === 'block')
-          return result.push({p:point.offset(dv.x*i, j - 3, dv.z*i),a:'longjump'});
-      }
-    }
-  });
-  // longjump
-  for(const yaw of [1]) {
-    const p = emulatePhysics(bot,yaw);
-
-    if(safePos(p)) result.push({p:p,a:'longjump'});
-  }
-  return result.map(el=>new Node(el.p, el.a));
-}*/
 module.exports = Navigator;

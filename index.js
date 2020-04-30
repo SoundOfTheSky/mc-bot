@@ -19,7 +19,7 @@ class bot {
   everySec = setInterval(async () => {}, 1000);
   everyTick = setInterval(() => {
     if (!this.bot.entity) return;
-    if (!this.connected) console.log(this.bot.physics);
+    //if (!this.connected) console.log(this.bot.physics);
     this.connected = true;
     let p = this.bot.entity.position.floored();
     if (!this.lastPosition.equals(p)) {
@@ -36,5 +36,5 @@ class bot {
 const skyBot = new bot({
   username: 'SkyBot',
   host: 'localhost',
-  port: 2249,
+  port: 7288,
 });
