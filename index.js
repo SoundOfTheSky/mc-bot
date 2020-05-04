@@ -36,5 +36,5 @@ class bot {
 const skyBot = new bot({
   username: 'SkyBot',
   host: 'localhost',
-  port: 7288,
+  port: 8107,
 });

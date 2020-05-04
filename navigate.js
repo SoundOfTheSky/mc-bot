@@ -40,7 +40,7 @@ class Navigator {
   }
   moveToPoint(node) {
     return new Promise((r, j) => {
-      if (node.action) {
+      if (node.action === 'move') {
         // center player
         const p = vecMid(node.point);
         this.bot.entity.position = vecMid(this.bot.entity.position);
@@ -73,9 +73,10 @@ class Navigator {
             r();
           }
         }, 50);
-      } else
-        setInterval(() => {
-          bot.look(node.yaw, 0);
+      } else {
+        let stop = false;
+        const interval = setInterval(() => {
+          this.bot.look(node.yaw, 0);
           this.bot.clearControlStates();
           if (node.forward === 1) this.bot.setControlState('forward', true);
           if (node.forward === -1) this.bot.setControlState('back', true);
@@ -83,14 +84,22 @@ class Navigator {
           if (node.right === -1) this.bot.setControlState('left', true);
           if (node.jump) this.bot.setControlState('jump', true);
           if (node.sprint) this.bot.setControlState('sprint', true);
-          const d=this.bot.entity.position.distanceTo(node.point);
+          const d = this.bot.entity.position.distanceTo(node.point);
+          console.log(d);
           if (d < 0.1) {
-            console.log(d);
+            this.bot.clearControlStates();
+            clearInterval(interval);
             r();
-          } else
-            console.log(`FUCKING ALARM IDK HOW PROGRAMMING WORKS
-            ${this.bot.entity.position.distanceTo(node.point)} meters away`);
+          }
+          if (this.bot.entity.onGround)
+            if (stop) {
+              this.bot.clearControlStates();
+              clearInterval(interval);
+              console.log(this.bot.entity.position);
+              console.log(node.point);
+            } else stop = true;
         }, 50);
+      }
     });
   }
   navigate = async p => {
@@ -105,7 +114,7 @@ class Navigator {
     });
     if (results.status === 'success') {
       for (const node of results.path) {
-        console.log('goto ' + node.point);
+        console.log(node);
         await this.moveToPoint(node);
       }
     }
@@ -238,7 +247,6 @@ class Navigator {
     return block0.boundingBox === 'block';
   }
   getNeighborsUsingPhysics(node) {
-    console.log(node.point);
     try {
       const p = node.point.floored();
       const results = [];
@@ -252,24 +260,37 @@ class Navigator {
           const checkDir = i => {
             const d = directions[i];
             const b = (y, m = 1) => p.offset(d.x * m, y, d.z * m);
-            // if block at head height can do nothing
             if (this.blockAt(b(1)).boundingBox === 'block') return;
-            // can walk forward
             if (this.isSafePos(b(0))) return results.push({ pos: b(0) });
-            // can jump on block
             canJump = this.blockAt(p.offset(0, 2, 0)).boundingBox === 'empty';
             if (canJump && this.isSafePos(b(1))) return results.push({ pos: b(1) });
-            // can jump off safely
             for (let hy = 1; hy <= 3; hy++) if (this.isSafePos(b(-hy))) return results.push({ pos: b(-hy) });
             if (this.isSafePos(b(-3, 2))) return results.push({ pos: b(-3, 2) });
-            // start jump calculation if can do nothing
             if (canJump) {
-              // check the jump only for this direction and the diagonal direction to the right
               [radians[i * 2], radians[i * 2 + 1]].forEach(r => {
-                // emulate mineflayer physics
-                let point = this.emulatePhysics(p.clone(), r, 1, 0, true, node.onGround, node.falling, true, node.vel);
-                // if don't collide with anything on the x, z axis or take damage from falling
-                if (point) results.push({ ...point, yaw: r, forward: 1, right: 0, jump: true, sprint: true });
+                let point = this.emulatePhysics(
+                  vecMid(p.clone()),
+                  r,
+                  1,
+                  0,
+                  true,
+                  node.onGround,
+                  node.falling,
+                  true,
+                  node.vel,
+                );
+                console.log(point);
+                if (point) {
+                  results.push({
+                    ...point,
+                    yaw: r,
+                    forward: 1,
+                    right: 0,
+                    jump: true,
+                    sprint: true,
+                    action: 'navigate',
+                  });
+                }
               });
             }
           };
@@ -298,7 +319,16 @@ class Navigator {
             true,
             node.vel,
           );
-          if (p) results.push({ ...p, yaw: node.yaw, forward: o[0], right: o[1], jump: false, sprint: true, action:'navigate' });
+          if (p)
+            results.push({
+              ...p,
+              yaw: node.yaw,
+              forward: o[0],
+              right: o[1],
+              jump: false,
+              sprint: true,
+              action: 'navigate',
+            });
         });
       /*console.log(
         results.map(
