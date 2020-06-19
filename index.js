@@ -18,8 +18,6 @@ class bot {
   lastPosition = vec3(0, 0, 0);
   everyTick = setInterval(() => {
     if (!this.bot.entity) return;
-    console.log(this.bot.entity.velocity);
-    console.log(this.bot.physics);
     this.connected = true;
     let p = this.bot.entity.position.floored();
     if (!this.lastPosition.equals(p)) {
@@ -36,5 +34,5 @@ class bot {
 const skyBot = new bot({
   username: 'SkyBot',
   host: 'localhost',
-  port: 3381,
+  port: 7930,
 });
