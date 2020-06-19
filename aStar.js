@@ -1,5 +1,3 @@
-const assert = require('assert');
-
 module.exports = aStar;
 
 function aStar(params) {
@@ -61,8 +59,5 @@ function reconstructPath(node) {
     const pathSoFar = reconstructPath(node.parent);
     pathSoFar.push(node.data);
     return pathSoFar;
-  } else {
-    // this is the starting node
-    return [node.data];
-  }
+  } else return [node.data];
 }

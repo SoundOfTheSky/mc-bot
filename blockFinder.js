@@ -5,29 +5,13 @@ var abs = Math.abs;
 module.exports = init;
 
 var MAX_CPU_SPIN = 10;
-var vec3=require('vec3');
+var vec3 = require('vec3');
 
 function init() {
-
   function inject(bot) {
+    var unit = [vec3(-1, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0), vec3(0, 0, 1), vec3(0, 0, -1)];
 
-    var unit = [
-      vec3(-1,  0,  0),
-      vec3( 1,  0,  0),
-      vec3( 0,  1,  0),
-      vec3( 0, -1,  0),
-      vec3( 0,  0,  1),
-      vec3( 0,  0, -1),
-    ];
-
-    var zeroed = [
-      vec3(0, 1, 1),
-      vec3(0, 1, 1),
-      vec3(1, 0, 1),
-      vec3(1, 0, 1),
-      vec3(1, 1, 0),
-      vec3(1, 1, 0),
-    ];
+    var zeroed = [vec3(0, 1, 1), vec3(0, 1, 1), vec3(1, 0, 1), vec3(1, 0, 1), vec3(1, 1, 0), vec3(1, 1, 0)];
 
     function CubeIterator(center) {
       this.center = center.floored();
@@ -42,14 +26,14 @@ function init() {
       }
     }
 
-    CubeIterator.prototype.next = function() {
+    CubeIterator.prototype.next = function () {
       this.point.z += 1;
       if (this.point.z > this.max.z) {
         this.point.z = 0;
         this.point.y += 1;
         if (this.point.y > this.max.y) {
           this.point.y = 0;
-          this.point.x += 1
+          this.point.x += 1;
           if (this.point.x > this.max.x) {
             this.point.x = 0;
             this.side += 1;
@@ -69,8 +53,7 @@ function init() {
       var offset = this.point.minus(this.max.scaled(0.5).floored()).plus(unit[this.side].scaled(this.apothem));
       var abs_coords = this.center.plus(offset);
       return abs_coords;
-
-    }
+    };
 
     var newBlockMap = {};
 
@@ -118,14 +101,15 @@ function init() {
 
     function NeighborIterator(center) {
       this.center = center.floored();
-      this.closedSet = { // All blocks that are this.distance blocks away
+      this.closedSet = {
+        // All blocks that are this.distance blocks away
         center: this.center,
       };
       this.openSet = {}; // When a block in the closedSet is checked, its adjacent neighbors are added to the openSet (the ones that do not lead back to the center).
       this.distance = 0;
     }
 
-    NeighborIterator.prototype.next = function() {
+    NeighborIterator.prototype.next = function () {
       // Get first item in closedSet
       for (var key in this.closedSet) break;
 
@@ -154,7 +138,7 @@ function init() {
         this.openSet[offset] = offset;
       }
       return point;
-    }
+    };
 
     function OctahedronIterator(center) {
       this.center = center.floored();
@@ -166,7 +150,7 @@ function init() {
       this.R = this.L + 1;
     }
 
-    OctahedronIterator.prototype.next = function() {
+    OctahedronIterator.prototype.next = function () {
       this.R -= 1;
       if (this.R < 0) {
         this.L -= 1;
@@ -194,38 +178,38 @@ function init() {
       var offset = vec3(X, Y, Z);
       var point = offset.plus(this.center);
       return point;
-    }
+    };
 
     function createBlockTypeMatcher(blockType) {
-      return function(block) {
+      return function (block) {
         return block == null ? false : blockType === block.type;
       };
     }
 
     function createBlockArrayMatcher(blockArray) {
-      return function(block) {
+      return function (block) {
         return block == null ? false : blockArray.indexOf(block.type) !== -1;
       };
     }
 
     function createBlockMapMatcher(blockTypeMap) {
-      return function(block) {
+      return function (block) {
         return block == null ? false : blockTypeMap[block.type];
       };
     }
 
     function predicateFromMatching(matching) {
-      if (typeof(matching) === 'number') {
-        return createBlockTypeMatcher(matching)
-      } else if (typeof(matching) === 'function') {
+      if (typeof matching === 'number') {
+        return createBlockTypeMatcher(matching);
+      } else if (typeof matching === 'function') {
         return matching;
       } else if (Array.isArray(matching)) {
         return createBlockArrayMatcher(matching);
-      } else if (typeof(matching) === 'object') {
+      } else if (typeof matching === 'object') {
         return createBlockMapMatcher(matching);
       } else {
         // programmer error. crash loudly and proudly
-        throw new Error("Block Finder: Unknown value for matching: " + matching);
+        throw new Error('Block Finder: Unknown value for matching: ' + matching);
       }
     }
 
@@ -264,7 +248,7 @@ function init() {
       var it = new OctahedronIterator(options.point);
 
       var result = [];
-      setImmediate(function() {
+      setImmediate(function () {
         while (result.length < options.count && it.apothem <= options.maxDistance) {
           var block = bot.blockAt(it.next());
 
@@ -273,7 +257,6 @@ function init() {
         return callback(null, result);
       });
     }
-
   }
   return inject;
 }
