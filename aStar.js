@@ -1,59 +1,48 @@
 module.exports = aStar;
 
 function aStar(params) {
-  const startNode = {
-    data: params.start,
-    g: 0,
-    h: params.heuristic(params.start),
-  };
-  let bestNode = startNode;
-  startNode.f = startNode.h;
-  const closedDataSet = [];
-  const openHeap = [];
-  const openDataMap = {};
-  openHeap.push(startNode);
-  openDataMap[startNode.toString()] = startNode;
-  while (openHeap.length) {
-    const node = openHeap.pop();
-    delete openDataMap[node.data.toString()];
-    if (params.isEnd(node.data))
-      return {
-        status: 'success',
-        cost: node.g,
-        path: reconstructPath(node),
-      };
-    closedDataSet.push(node.data.toString());
-    const neighbors = params.neighbor(node.data);
-    for (const neighborData of neighbors) {
-      if (closedDataSet.includes(neighborData.toString())) continue;
-      const gFromThisNode = node.g + params.distance(node.data, neighborData);
-      let neighborNode = openDataMap[neighborData.toString()];
-      let update = false;
-      if (neighborNode === undefined) {
-        neighborNode = {
-          data: neighborData,
-        };
-        openDataMap[neighborData.toString()] = neighborNode;
-      } else {
-        if (neighborNode.g < gFromThisNode) continue;
-        update = true;
+  return new Promise(r => {
+    // g - path cost
+    // h - distance to end
+    const startNode = {
+      data: params.start,
+      g: 0,
+      h: params.heuristic(params.start),
+    };
+    let closestNode = startNode;
+    const checked = [];
+    const unchecked = [];
+    unchecked.push(startNode);
+    const interval = setInterval(() => {
+      if (!unchecked.length) {
+        clearInterval(interval);
+        return r({
+          status: 'noPath',
+          path: reconstructPath(closestNode),
+        });
       }
-      neighborNode.parent = node;
-      neighborNode.g = gFromThisNode;
-      neighborNode.h = params.heuristic(neighborData);
-      neighborNode.f = gFromThisNode + neighborNode.h;
-      if (neighborNode.h < bestNode.h) bestNode = neighborNode;
-      if (!update) openHeap.push(neighborNode);
-      openHeap.sort((a, b) => b.f - a.f);
-    }
-  }
-  return {
-    status: 'noPath',
-    cost: bestNode.g,
-    path: reconstructPath(bestNode),
-  };
+      const node = unchecked.pop();
+      if (params.isEnd(node.data))
+        return r({
+          status: 'success',
+          path: reconstructPath(node),
+        });
+      checked.push(node.data.toString());
+      for (const neighborData of params.getNeighbors(node.data)) {
+        if (checked.includes(neighborData.toString())) continue;
+        const neighborNode = {
+          data: neighborData,
+          parent: node,
+          g: node.g + params.distance(node.data, neighborData),
+          h: params.heuristic(neighborData),
+        };
+        if (closestNode.h > neighborNode.h) closestNode = neighborNode;
+        unchecked.push(neighborNode);
+      }
+      unchecked.sort((a, b) => b.g + b.h - (a.g + a.h));
+    }, params.interval || 10);
+  });
 }
-
 function reconstructPath(node) {
   if (node.parent !== undefined) {
     const pathSoFar = reconstructPath(node.parent);

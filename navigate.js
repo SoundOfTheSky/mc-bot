@@ -3,7 +3,7 @@ const Vec3 = require('vec3');
 const { Physics, PlayerState } = require('prismarine-physics');
 const vecMid = v => v.floored().offset(0.5, 0, 0.5);
 const isWater = b => b.type === 8 || b.type === 9;
-const radians = [
+/*const radians = [
   Math.PI * 2, //0 z-
   Math.PI / 4, //45 x-z-
   Math.PI / 2, //90 x-
@@ -12,7 +12,7 @@ const radians = [
   (5 * Math.PI) / 4, //225 x+z+
   (3 * Math.PI) / 2, //270 x+
   (7 * Math.PI) / 4, //315 x+z-
-];
+];*/
 const diagonalDirections = [Vec3(-1, 0, -1), Vec3(-1, 0, 1), Vec3(1, 0, 1), Vec3(1, 0, -1)];
 const directions = [Vec3(0, 0, -1), Vec3(-1, 0, 0), Vec3(0, 0, 1), Vec3(1, 0, 0)];
 function Node(d) {
@@ -73,10 +73,10 @@ class Navigator {
   }
   navigate = async p => {
     const end = p.floored();
-    const results = aStar({
+    const results = await aStar({
       start: new Node({ pos: this.bot.entity.position.floored() }),
       isEnd: node => node.point.distanceTo(end) <= 0.1,
-      neighbor: node => this.getNeighborsSimple(node),
+      getNeighbors: this.getNeighborsSimple,
       distance: (a, b) => a.point.distanceTo(b.point),
       heuristic: node => node.point.distanceTo(end),
     });
@@ -88,7 +88,7 @@ class Navigator {
     if (results.status === 'success') for (const node of results.path) await this.moveToPoint(node);
     console.log(results.status);
   };
-  getBoundingBox = pos => ({
+  getPlayerBoundingBox = pos => ({
     min: new Vec3(pos.x - this.bot.physics.playerApothem, pos.y, pos.z - this.bot.physics.playerApothem).floor(),
     max: new Vec3(
       pos.x + this.bot.physics.playerApothem,
@@ -158,9 +158,14 @@ class Navigator {
   getNeighborsSimple(node) {
     try {
       const p = node.point.floored();
+      if (!this.isSafePos(p)) {
+        console.log('Somehow returned not save pos');
+        return [];
+      }
       const results = [];
       const freeDirections = [];
-      let canJump = this.bot.blockAt(p.offset(0, 2, 0)).boundingBox === 'empty';
+      const walkableDirections = [];
+      const canJump = this.bot.blockAt(p.offset(0, 2, 0)).boundingBox === 'empty';
       // jump, drop, swim up and down
       if (this.isSafePos(p.offset(0, 1, 0))) results.push({ pos: p.offset(0, 1, 0) });
       if (this.isSafePos(p.offset(0, -1, 0))) results.push({ pos: p.offset(0, -1, 0) });
@@ -169,6 +174,7 @@ class Navigator {
         // if block at head level cant go in this direction
         if (this.bot.blockAt(b(1)).boundingBox === 'block') return;
         if (i !== undefined) freeDirections[i] = true;
+        if (i !== undefined) walkableDirections[i] = true;
         // walk forward
         if (this.isSafePos(b(0))) return results.push({ pos: b(0) });
         // walk up
@@ -176,6 +182,7 @@ class Navigator {
         // walk down
         for (let hy = 1; hy <= 3; hy++) if (this.isSafePos(b(-hy))) return results.push({ pos: b(-hy) });
         if (this.isSafePos(b(-3, 2))) return results.push({ pos: b(-3, 2) });
+        if (i !== undefined) walkableDirections[i] = false;
       };
       // check cardinal dirs
       for (let i = 0; i < directions.length; i++) checkDir(directions[i], i);
@@ -184,11 +191,37 @@ class Navigator {
         if (freeDirections[i] && freeDirections[(i + 1) % 4]) checkDir(diagonalDirections[i]);
       // eslint-disable-next-line no-constant-condition
       if (canJump)
-        for (let yaw = 0; yaw < 360; yaw += 15) {
-          const player = this.emulateTill({ entity: { position: p, yaw } }, {}, p => p.entity.isCollidedVertically);
-          if (player.entity.isInWater || player.entity.isInWeb || p.y - player.entity.position.y < 2) {
-            console.log(yaw, player.entity.position.floored(), p.y - player.entity.position.y);
-            results.push({ pos: player.entity.position.floored(), action: 'jump' });
+        for (let yawi = 0; yawi < 24; yawi++) {
+          /*
+            Goes around and tries to emulate jump to point.
+            From 330 degrees and around.
+            If direction is blocked skipping -45-45 degrees
+            If direction is walkable skipping -30-30 degrees
+          */
+          const dir = Math.floor(yawi / 6);
+          if (!freeDirections[dir] || (yawi % 6 !== 0 && walkableDirections[dir])) return;
+          const player = this.emulateTill(
+            { entity: { position: p, yaw: (yawi * 15 + 315) % 360 } },
+            {},
+            p => p.entity.isCollidedVertically,
+          );
+          const d = player.position.minus(p);
+          const max = Math.max(d.x, d.z);
+          const step = new Vec3(d.x / max, 0, d.z / max);
+          let c = p;
+          for (let i = 0; i < max; i++) {
+            c = p.plus(step);
+            // HERE
+            for (let y = p.y + 1; y > 0; y--) {
+              if (new Vec3(c.x + this.bot.physics.playerApothem, y.c.z + this.bot.physics.playerApothem))
+                if (new Vec3(c.x + this.bot.physics.playerApothem, y.c.z - this.bot.physics.playerApothem))
+                  if (new Vec3(c.x - this.bot.physics.playerApothem, y.c.z + this.bot.physics.playerApothem))
+                    if (new Vec3(c.x - this.bot.physics.playerApothem, y.c.z - this.bot.physics.playerApothem))
+                      c.x + this.bot.physics.playerApothem;
+              if (player.entity.isInWater || player.entity.isInWeb || p.y - player.entity.position.y < 2) {
+                results.push({ pos: player.entity.position.floored(), action: 'jump' });
+              }
+            }
           }
         }
       return results.map(el => new Node(el));
