@@ -1,5 +1,6 @@
 const aStar = require('./aStar');
 const Vec3 = require('vec3');
+const { Physics, PlayerState } = require('prismarine-physics');
 const vecMid = v => v.floored().offset(0.5, 0, 0.5);
 const isWater = b => b.type === 8 || b.type === 9;
 const radians = [
@@ -23,10 +24,12 @@ class Navigator {
   constructor(bot) {
     this.bot = bot;
     this.bot.navigate = this.navigate;
+    this.bot.physics.jumpSpeed = 10;
+    this.physics = Physics(require('minecraft-data')(this.bot.version), { getBlock: this.bot.blockAt });
   }
   moveToPoint(node) {
     console.log(node);
-    return new Promise((r, j) => {
+    return new Promise(r => {
       // center player
       const p = vecMid(node.point);
       this.bot.entity.position = vecMid(this.bot.entity.position);
@@ -47,8 +50,8 @@ class Navigator {
           this.bot.entity.position.z += node.point.x > this.bot.entity.position.z ? 0.1 : -0.1;
         } else {
           if (
-            Math.abs(this.bot.entity.position.x - node.point.x) > 0.2 ||
-            Math.abs(this.bot.entity.position.z - node.point.z) > 0.2
+            Math.abs(this.bot.entity.position.x - node.point.x) > 0.1 ||
+            Math.abs(this.bot.entity.position.z - node.point.z) > 0.1
           ) {
             this.bot.setControlState('forward', true);
             this.bot.setControlState('sprint', true);
@@ -65,12 +68,10 @@ class Navigator {
           clearInterval(interval);
           r();
         }
-      }, 50);
+      }, 1);
     });
   }
   navigate = async p => {
-    this.emuJumps = radians.map(r => this.emulateJump(r));
-    this.bot.physics.jumpSpeed = 10;
     const end = p.floored();
     const results = aStar({
       start: new Node({ pos: this.bot.entity.position.floored() }),
@@ -79,11 +80,12 @@ class Navigator {
       distance: (a, b) => a.point.distanceTo(b.point),
       heuristic: node => node.point.distanceTo(end),
     });
-    if (results.status === 'success') {
-      for (const node of results.path) {
-        await this.moveToPoint(node);
-      }
-    }
+    this.bot.viewer.drawLine(
+      'navigation',
+      results.path.map(el => vecMid(el.point)),
+      0x0089ff,
+    );
+    if (results.status === 'success') for (const node of results.path) await this.moveToPoint(node);
     console.log(results.status);
   };
   getBoundingBox = pos => ({
@@ -107,23 +109,6 @@ class Navigator {
     }
     return false;
   }
-  emulateJump(yaw, pos = new Vec3(0, 0, 0), sprint = true) {
-    let vel = new Vec3(
-      this.bot.physics.maxGroundSpeed * this.bot.physics.sprintSpeed * -Math.sin(yaw),
-      this.bot.physics.jumpSpeed,
-      this.bot.physics.maxGroundSpeed * this.bot.physics.sprintSpeed * -Math.cos(yaw),
-    );
-    let results = [];
-    while (true) {
-      vel.y -= this.bot.physics.gravity * 0.05;
-      vel.y = Math.min(Math.max(vel.y, -this.bot.physics.terminalVelocity), this.bot.physics.terminalVelocity);
-      pos.x += vel.x * 0.05;
-      pos.z += vel.z * 0.05;
-      pos.y += vel.y * 0.05;
-      results.push(pos.clone());
-      if (pos.y <= -255) return results;
-    }
-  }
   isSafePos(pos) {
     const block0 = this.bot.blockAt(pos.offset(0, -1, 0));
     const block1 = this.bot.blockAt(pos);
@@ -132,70 +117,80 @@ class Navigator {
     if (isWater(block0) || isWater(block1) || isWater(block2)) return true;
     return block0.boundingBox === 'block';
   }
+  emulateTill(state = {}, controls = {}, isEnd = () => {}, tickTimeout = 400) {
+    const player = {
+      version: this.bot.version,
+      inventory: {
+        slots: state.inventory?.slots ? [...state.inventory.slots] : [],
+      },
+      entity: {
+        position: state.entity?.position ? state.entity.position.clone() : new Vec3(0, 0, 0),
+        velocity: state.entity?.velocity ? state.entity.velocity.clone() : new Vec3(0, 0, 0),
+        onGround: state.entity?.onGround ? state.entity.onGround : true,
+        isInWater: state.entity?.isInWater ? state.entity.isInWater : false,
+        isInLava: state.entity?.isInLava ? state.entity.isInLava : false,
+        isInWeb: state.entity?.isInWeb ? state.entity.isInWeb : false,
+        isCollidedHorizontally: false,
+        isCollidedVertically: false,
+        effects: state.entity?.effects ? [...state.entity.effects] : [],
+        yaw: state.entity?.yaw ? state.entity.yaw : 0,
+      },
+      jumpTicks: state.jumpTicks || 0,
+      jumpQueued: state.jumpQueued || false,
+    };
+    const playerState = new PlayerState(player, {
+      ...{
+        forward: true,
+        back: false,
+        left: false,
+        right: false,
+        jump: true,
+        sprint: true,
+        sneak: false,
+      },
+      ...controls,
+    });
+    let ticksLeft = tickTimeout;
+    while (!isEnd(player) && ticksLeft--)
+      this.physics.simulatePlayer(playerState, { getBlock: this.bot.blockAt }).apply(player);
+    return player;
+  }
   getNeighborsSimple(node) {
     try {
       const p = node.point.floored();
       const results = [];
-      let canJump;
+      const freeDirections = [];
+      let canJump = this.bot.blockAt(p.offset(0, 2, 0)).boundingBox === 'empty';
       // jump, drop, swim up and down
       if (this.isSafePos(p.offset(0, 1, 0))) results.push({ pos: p.offset(0, 1, 0) });
       if (this.isSafePos(p.offset(0, -1, 0))) results.push({ pos: p.offset(0, -1, 0) });
-      // if player on ground check cardinal directions
-      if (this.bot.blockAt(p.offset(0, -0.1, 0)).boundingBox === 'block') {
-        const checkDir = (d, i) => {
-          const b = (y, m = 1) => p.offset(d.x * m, y, d.z * m);
-          // if block at head level cant go in this direction
-          if (this.bot.blockAt(b(1)).boundingBox === 'block') return;
-          if (i !== undefined) freeDirections[i] = true;
-          // walk forward
-          if (this.isSafePos(b(0))) return results.push({ pos: b(0) });
-          // walk up
-          canJump = this.bot.blockAt(p.offset(0, 2, 0)).boundingBox === 'empty';
-          if (canJump && this.isSafePos(b(1))) return results.push({ pos: b(1) });
-          // walk down
-          for (let hy = 1; hy <= 3; hy++) if (this.isSafePos(b(-hy))) return results.push({ pos: b(-hy) });
-          if (this.isSafePos(b(-3, 2))) return results.push({ pos: b(-3, 2) });
-        };
-        const freeDirections = [];
-        // check cardinal dirs
-        for (let i = 0; i < directions.length; i++) {
-          checkDir(directions[i], i);
-        }
-        // check diagonal dirs
-        for (let i = 0; i < diagonalDirections.length; i++) {
-          if (freeDirections[i] && freeDirections[(i + 1) % 4]) checkDir(diagonalDirections[i]);
-        }
-        if (canJump)
-          // fucking jumping
-          for (let i = 0; i < radians.length; i++) {
-            if ((i % 2 === 0 && !freeDirections[i % 4]) || !freeDirections[i % 4] || !freeDirections[((i % 4) + 1) % 4])
-              continue;
-            const r = radians[i];
-            let lastBlock;
-            // get emulated positions and apply to player's pos
-            // then get closest surface to land on
-            this.emuJumps[i].forEach(ep => {
-              // skip same block for performance
-              if (lastBlock && ep.floored().equals(lastBlock)) return;
-              lastBlock = ep.floored();
-              for (let y = p.y + ep.y; y > 0; y--) {
-                // TODO: CHECK IF PLAYERS JUMP IS NOT OBSTRUCTED OR ANYTHING
-                // TODO: ALSO SOMETHING WITH NAVIGATION WRONG OR IDK somitemes stuck
-                // TODO: SOMETHING WRONG WITH JUMPING IN WATER
-                // TODO: ALSO SWIMMING NAVIGATION
-                let cursor = new Vec3(p.x + ep.x, y, p.z + ep.z);
-                let block = this.bot.blockAt(cursor);
-                if (block.boundingBox === 'block') {
-                  if (p.y - y <= 3) results.push({ pos: block.position.offset(0, 1, 0), action: 'jump' });
-                  break;
-                } else if (isWater(block)) {
-                  results.push({ pos: block.position.offset(0, 1, 0), action: 'jump' });
-                  break;
-                }
-              }
-            });
+      const checkDir = (d, i) => {
+        const b = (y, m = 1) => p.offset(d.x * m, y, d.z * m);
+        // if block at head level cant go in this direction
+        if (this.bot.blockAt(b(1)).boundingBox === 'block') return;
+        if (i !== undefined) freeDirections[i] = true;
+        // walk forward
+        if (this.isSafePos(b(0))) return results.push({ pos: b(0) });
+        // walk up
+        if (canJump && this.isSafePos(b(1))) return results.push({ pos: b(1) });
+        // walk down
+        for (let hy = 1; hy <= 3; hy++) if (this.isSafePos(b(-hy))) return results.push({ pos: b(-hy) });
+        if (this.isSafePos(b(-3, 2))) return results.push({ pos: b(-3, 2) });
+      };
+      // check cardinal dirs
+      for (let i = 0; i < directions.length; i++) checkDir(directions[i], i);
+      // check diagonal dirs
+      for (let i = 0; i < diagonalDirections.length; i++)
+        if (freeDirections[i] && freeDirections[(i + 1) % 4]) checkDir(diagonalDirections[i]);
+      // eslint-disable-next-line no-constant-condition
+      if (canJump)
+        for (let yaw = 0; yaw < 360; yaw += 15) {
+          const player = this.emulateTill({ entity: { position: p, yaw } }, {}, p => p.entity.isCollidedVertically);
+          if (player.entity.isInWater || player.entity.isInWeb || p.y - player.entity.position.y < 2) {
+            console.log(yaw, player.entity.position.floored(), p.y - player.entity.position.y);
+            results.push({ pos: player.entity.position.floored(), action: 'jump' });
           }
-      } else return [];
+        }
       return results.map(el => new Node(el));
     } catch (e) {
       console.log(e);

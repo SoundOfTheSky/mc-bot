@@ -1,38 +1,33 @@
 const mineflayer = require('mineflayer');
+const mineflayerViewer = require('prismarine-viewer').mineflayer;
+//const vec3 = require('vec3');
 const navigate = require('./navigate');
-const getTps = require('./getTps');
-const vec3 = require('vec3');
 class bot {
   static list = [];
   constructor(options) {
     this.bot = mineflayer.createBot(options);
     this.id = bot.list.length;
-    this.navigator = new navigate(this.bot);
     this.bot.on('chat', (username, message) => {
       if (username === this.bot.username) return;
       const target = this.bot.players[username].entity;
       if (message === 'come') this.bot.navigate(target.position);
       if (message === 'hey') this.bot.lookAt(target.position);
     });
+    this.bot.once('spawn', () => {
+      mineflayerViewer(this.bot, { port: 3007 });
+      this.navigator = new navigate(this.bot);
+      const path = [this.bot.entity.position.clone()];
+      this.bot.on('move', () => {
+        if (path[path.length - 1].distanceTo(this.bot.entity.position) > 1) {
+          path.push(this.bot.entity.position.clone());
+          this.bot.viewer.drawLine('path', path);
+        }
+      });
+    });
   }
-  lastPosition = vec3(0, 0, 0);
-  everyTick = setInterval(() => {
-    if (!this.bot.entity) return;
-    this.connected = true;
-    let p = this.bot.entity.position.floored();
-    if (!this.lastPosition.equals(p)) {
-      this.lastPosition = p;
-      const b0 = this.bot.blockAt(p.offset(0, -1, 0));
-      const b1 = this.bot.blockAt(p);
-      const b2 = this.bot.blockAt(p.offset(0, 1, 0));
-      if ([b0, b1, b2].find(b => b.type === 8 || b.type === 9)) this.bot.physics.gravity = 0;
-      else this.bot.physics.gravity = 27;
-    }
-  }, 50);
-  connected = false;
 }
-const skyBot = new bot({
+new bot({
   username: 'SkyBot',
   host: 'localhost',
-  port: 7930,
+  port: 53662,
 });
